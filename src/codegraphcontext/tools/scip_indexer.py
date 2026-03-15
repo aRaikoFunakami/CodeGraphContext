@@ -39,6 +39,9 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from ..utils.debug_log import info_logger, warning_logger, error_logger, debug_log
 
+# Pre-compiled regex for C++ scip-clang symbol patterns: name(hex_hash).
+_RE_CPP_FUNC = re.compile(r'\([0-9a-f]+\)\.\s*$')
+
 # ---------------------------------------------------------------------------
 # Language → SCIP indexer mapping
 # ---------------------------------------------------------------------------
@@ -226,9 +229,10 @@ class ScipIndexParser:
         """
         try:
             from . import scip_pb2  # type: ignore
-        except ImportError:
+        except ImportError as exc:
             error_logger(
-                "scip_pb2.py not found in tools directory."
+                f"Failed to import scip_pb2: {exc}. "
+                "Install the SCIP dependency with: pip install codegraphcontext[scip]"
             )
             return {}
 
@@ -312,19 +316,20 @@ class ScipIndexParser:
                     defn = symbol_def_table.get(sym, {})
                     kind = defn.get("kind", 0)
                     
-                    # If kind is 0 (Unspecified), guess from symbol string
+                    # If kind is 0 (Unspecified), guess from symbol string.
+                    # Python/Go/TS symbols end with "()." for functions.
+                    # C++ scip-clang symbols end with "(hex_hash)." for
+                    # functions/methods, "#" for classes, and plain "." for
+                    # member variables.
                     if kind == 0:
                         if sym.endswith("()."):
                             kind = 17  # Function
-                        elif "#" in sym and not sym.endswith("."):
-                             # If it ends with # (e.g. MyClass#) or has # then members
-                             if sym.endswith("#"):
-                                 kind = 7 # Class
-                             elif sym.endswith("()."):
-                                 kind = 26 # Method
-                             else:
-                                 # Possibly a field or nested class or parameter
-                                 pass 
+                        elif _RE_CPP_FUNC.search(sym):
+                            kind = 26 if "#" in sym else 17  # Method or Function
+                        elif sym.endswith("#"):
+                            kind = 7   # Class / struct
+                        elif "#" in sym and sym.endswith("."):
+                            kind = 15  # Field / member variable
 
                     display = defn.get("display_name", "")
                     doc_str = defn.get("documentation", "")
@@ -395,13 +400,22 @@ class ScipIndexParser:
         return {"files": files_data, "symbol_table": symbol_def_table}
 
     def _name_from_symbol(self, symbol: str) -> str:
-        """Extract the human-readable name from a SCIP symbol ID."""
-        # SCIP symbols look like: "scip-python . . mymodule/MyClass#method()."
-        import re
+        """Extract the human-readable name from a SCIP symbol ID.
+
+        Examples:
+          Python/Go: "scip-python . . mymodule/MyClass#method()."  → "method"
+          C++ scip-clang: "cxx . . $ Kakoune/Buffer#reload(a1b2c3)." → "reload"
+          C++ scip-clang: "cxx . . $ Kakoune/Buffer#"               → "Buffer"
+        """
         s = symbol.rstrip(".#")
-        s = re.sub(r"\(\)\.?$", "", s) # Remove trailing () or ().
+        # Remove trailing (hex_hash) from C++ scip-clang symbols
+        s = re.sub(r'\([0-9a-f]+\)$', '', s)
+        # Remove trailing () from Python/Go/TS symbols
+        s = re.sub(r'\(\)$', '', s)
         parts = re.split(r'[/#]', s)
         last = parts[-1] if parts else symbol
+        # Strip backticks from quoted names like `operator==`
+        last = last.strip('`')
         return last or symbol
 
     def _lang_from_path(self, rel_path: str) -> str:

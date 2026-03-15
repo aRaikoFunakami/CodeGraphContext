@@ -1159,12 +1159,23 @@ class GraphBuilder:
                 )
 
     def _name_from_symbol(self, symbol: str) -> str:
-        """Extract human-readable name from a SCIP symbol ID string."""
+        """Extract human-readable name from a SCIP symbol ID string.
+
+        Examples:
+          Python/Go: "scip-python . . mymodule/MyClass#method()."  → "method"
+          C++ scip-clang: "cxx . . $ Kakoune/Buffer#reload(a1b2c3)." → "reload"
+          C++ scip-clang: "cxx . . $ Kakoune/Buffer#"               → "Buffer"
+        """
         import re
         s = symbol.rstrip(".#")
-        s = re.sub(r"\(\)\.?$", "", s) # Remove trailing () or ().
+        # Remove trailing (hex_hash) from C++ scip-clang symbols
+        s = re.sub(r'\([0-9a-f]+\)$', '', s)
+        # Remove trailing () from Python/Go/TS symbols
+        s = re.sub(r'\(\)$', '', s)
         parts = re.split(r'[/#]', s)
         last = parts[-1] if parts else symbol
+        # Strip backticks from quoted names like `operator==`
+        last = last.strip('`')
         return last or symbol
 
 

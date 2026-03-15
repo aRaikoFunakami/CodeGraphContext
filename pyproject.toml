@@ -40,6 +40,9 @@ parsing = [
     "tree-sitter>=0.21.0",
     "tree-sitter-language-pack>=0.6.0",
 ]
+scip = [
+    "protobuf>=3.20,<4",
+]
 dev = [
     "pytest>=7.4.0",
     "black>=23.11.0",
